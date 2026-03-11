@@ -1,7 +1,8 @@
-import data_transform/example_mappings.{
-  LpSignatoryFields, SourceFields, W9Fields,
+import data_transform/example_mappings.{str}
+import data_transform/proto/data_types.{MultipleCheckboxType}
+import data_transform/proto/source_table.{
+  LpSignatoryFields, LpSignatoryType, SourceTableFieldsMap, W9Fields, W9Type,
 }
-import gleam/option.{Some}
 import gleeunit
 import gleeunit/should
 
@@ -46,114 +47,184 @@ pub fn split_name_single_test() {
 
 pub fn commitment_mapping_test() {
   let src =
-    SourceFields(
+    SourceTableFieldsMap(
       ..ds(),
-      lp_signatory: Some(LpSignatoryFields(
-        ..{
-          let assert Some(lp) = ds().lp_signatory
-          lp
-        },
-        commitment_amount: "1,000,000",
-      )),
+      lp_signatory: LpSignatoryType(
+        ..ds().lp_signatory,
+        value_sub_fields: LpSignatoryFields(
+          ..ds().lp_signatory.value_sub_fields,
+          asa_commitment_amount: str("1,000,000"),
+        ),
+      ),
     )
   let target = example_mappings.transform(src)
-  target.commitment_amount |> should.equal(1_000_000.0)
+  target.sf_agreement_null_commitment_c.value_sub_fields.amount.value
+  |> should.equal(1_000_000.0)
 }
 
 pub fn investor_name_prefers_aml_test() {
   let src =
-    SourceFields(..ds(), aml_name: "AML Name", general_name: "General Name")
+    SourceTableFieldsMap(
+      ..ds(),
+      asa_fullname_investorname_amlquestionnaire: str("AML Name"),
+      asa_fullname_investorname_generalinfo1: str("General Name"),
+    )
   let target = example_mappings.transform(src)
-  target.investor_name |> should.equal("AML Name")
+  target.sf_account_subscription_investor_name.value
+  |> should.equal("AML Name")
 }
 
 pub fn investor_name_falls_back_test() {
   let src =
-    SourceFields(..ds(), aml_name: "", general_name: "General Name")
+    SourceTableFieldsMap(
+      ..ds(),
+      asa_fullname_investorname_amlquestionnaire: str(""),
+      asa_fullname_investorname_generalinfo1: str("General Name"),
+    )
   let target = example_mappings.transform(src)
-  target.investor_name |> should.equal("General Name")
+  target.sf_account_subscription_investor_name.value
+  |> should.equal("General Name")
 }
 
 pub fn regulated_status_yes_test() {
   let src =
-    SourceFields(..ds(), regulated_keys: [
-      "yes_luxsentity_regulatedstatus_part2_duediligencequestionnaire",
-    ])
+    SourceTableFieldsMap(
+      ..ds(),
+      luxsentity_regulatedstatus_part2_duediligencequestionnaire: MultipleCheckboxType(
+        ..ds().luxsentity_regulatedstatus_part2_duediligencequestionnaire,
+        selected_keys: [
+          "yes_luxsentity_regulatedstatus_part2_duediligencequestionnaire",
+        ],
+      ),
+    )
   let target = example_mappings.transform(src)
-  target.regulated_status |> should.equal("true")
+  target
+    .sf_account_subscription_investor_wlc_publicly_listed_on_a_stock_exchange_c
+    .selected_key
+  |> should.equal("true")
 }
 
 pub fn regulated_status_no_test() {
   let src =
-    SourceFields(..ds(), regulated_keys: [
-      "no_luxsentity_regulatedstatus_part2_duediligencequestionnaire",
-    ])
+    SourceTableFieldsMap(
+      ..ds(),
+      luxsentity_regulatedstatus_part2_duediligencequestionnaire: MultipleCheckboxType(
+        ..ds().luxsentity_regulatedstatus_part2_duediligencequestionnaire,
+        selected_keys: [
+          "no_luxsentity_regulatedstatus_part2_duediligencequestionnaire",
+        ],
+      ),
+    )
   let target = example_mappings.transform(src)
-  target.regulated_status |> should.equal("false")
+  target
+    .sf_account_subscription_investor_wlc_publicly_listed_on_a_stock_exchange_c
+    .selected_key
+  |> should.equal("false")
 }
 
 pub fn international_supplements_test() {
   let src =
-    SourceFields(..ds(), entity_intl_keys: [
-      "none_entity_internationalsupplements_part1_duediligencequestionnaire",
-    ])
+    SourceTableFieldsMap(
+      ..ds(),
+      entity_internationalsupplements_part1_duediligencequestionnaire: MultipleCheckboxType(
+        ..ds()
+          .entity_internationalsupplements_part1_duediligencequestionnaire,
+        selected_keys: [
+          "none_entity_internationalsupplements_part1_duediligencequestionnaire",
+        ],
+      ),
+    )
   let target = example_mappings.transform(src)
-  target.intl_supplements |> should.equal(["No Supplement"])
+  target
+    .sf_agreement_null_wlc_international_supplements_c
+    .selected_keys
+  |> should.equal(["No Supplement"])
 }
 
 pub fn signer_name_split_test() {
   let src =
-    SourceFields(
+    SourceTableFieldsMap(
       ..ds(),
-      lp_signatory: Some(LpSignatoryFields(
-        commitment_amount: "5000000",
-        individual_name: "",
-        entity_name: "Catherine L Ziobro",
-      )),
+      lp_signatory: LpSignatoryType(
+        ..ds().lp_signatory,
+        value_sub_fields: LpSignatoryFields(
+          asa_commitment_amount: str("5000000"),
+          individual_subscribername_signaturepage: str(""),
+          entity_authorizedname_signaturepage: str("Catherine L Ziobro"),
+        ),
+      ),
     )
   let target = example_mappings.transform(src)
-  target.signer_first_name |> should.equal("Catherine")
-  target.signer_middle_name |> should.equal("L")
-  target.signer_last_name |> should.equal("Ziobro")
+  target.sf_agreement_null_signer_first_name.value
+  |> should.equal("Catherine")
+  target.sf_agreement_null_signer_middle_name.value |> should.equal("L")
+  target.sf_agreement_null_signer_last_name.value |> should.equal("Ziobro")
 }
 
 pub fn signer_name_prefers_individual_test() {
   let src =
-    SourceFields(
+    SourceTableFieldsMap(
       ..ds(),
-      lp_signatory: Some(LpSignatoryFields(
-        commitment_amount: "5000000",
-        individual_name: "Jane Smith",
-        entity_name: "Entity Auth",
-      )),
+      lp_signatory: LpSignatoryType(
+        ..ds().lp_signatory,
+        value_sub_fields: LpSignatoryFields(
+          asa_commitment_amount: str("5000000"),
+          individual_subscribername_signaturepage: str("Jane Smith"),
+          entity_authorizedname_signaturepage: str("Entity Auth"),
+        ),
+      ),
     )
   let target = example_mappings.transform(src)
-  target.signer_first_name |> should.equal("Jane")
+  target.sf_agreement_null_signer_first_name.value |> should.equal("Jane")
 }
 
 pub fn w9_tin_type_ein_test() {
   let src =
-    SourceFields(..ds(), w9: Some(W9Fields(ssn: "", ein: "", line2: "")))
+    SourceTableFieldsMap(
+      ..ds(),
+      w9: W9Type(
+        ..ds().w9,
+        value_sub_fields: W9Fields(
+          w9_parti_ssn1: str(""),
+          w9_parti_ein1: str(""),
+          w9_line2: str(""),
+        ),
+      ),
+    )
   let target = example_mappings.transform(src)
-  target.tin_type |> should.equal("EIN")
+  target.sf_tax_form_w9_us_tin_type_c.selected_key |> should.equal("EIN")
 }
 
 pub fn w9_tin_type_ssn_test() {
   let src =
-    SourceFields(
+    SourceTableFieldsMap(
       ..ds(),
-      w9: Some(W9Fields(ssn: "123-45-6789", ein: "", line2: "")),
+      w9: W9Type(
+        ..ds().w9,
+        value_sub_fields: W9Fields(
+          w9_parti_ssn1: str("123-45-6789"),
+          w9_parti_ein1: str(""),
+          w9_line2: str(""),
+        ),
+      ),
     )
   let target = example_mappings.transform(src)
-  target.tin_type |> should.equal("SSN")
+  target.sf_tax_form_w9_us_tin_type_c.selected_key |> should.equal("SSN")
 }
 
 pub fn w9_tin_type_line2_present_test() {
   let src =
-    SourceFields(
+    SourceTableFieldsMap(
       ..ds(),
-      w9: Some(W9Fields(ssn: "", ein: "", line2: "Some LLC")),
+      w9: W9Type(
+        ..ds().w9,
+        value_sub_fields: W9Fields(
+          w9_parti_ssn1: str(""),
+          w9_parti_ein1: str(""),
+          w9_line2: str("Some LLC"),
+        ),
+      ),
     )
   let target = example_mappings.transform(src)
-  target.tin_type |> should.equal("")
+  target.sf_tax_form_w9_us_tin_type_c.selected_key |> should.equal("")
 }

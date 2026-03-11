@@ -1,58 +1,30 @@
 //// Concrete field transformations.
 //// Port of OCaml example_mappings.ml.
+//// Uses proto-generated types directly from source_table.gleam and target_table.gleam.
 
+import data_transform/proto/data_types.{
+  type MultipleCheckboxType, type NumberType, type RadioGroupType,
+  type StringType, MoneySubFields, MoneyType, MultipleCheckboxType, NumberType,
+  RadioGroupType, StringType,
+}
+import data_transform/proto/source_table.{
+  type SourceTableFieldsMap, LpSignatoryFields, LpSignatoryType,
+  SourceTableFieldsMap, W9Fields, W9Type,
+}
+import data_transform/proto/target_table.{
+  type TargetTableFieldsMap, TargetTableFieldsMap,
+}
 import gleam/float
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 
-// --- Types ---
+// --- Helpers ---
 
 pub type NameParts {
   NameParts(first_name: String, middle_name: String, last_name: String)
 }
-
-/// Source table fields (mirrors SourceTableFieldsMap from proto)
-pub type SourceFields {
-  SourceFields(
-    lp_signatory: Option(LpSignatoryFields),
-    aml_name: String,
-    general_name: String,
-    regulated_keys: List(String),
-    indi_intl_keys: List(String),
-    entity_intl_keys: List(String),
-    w9: Option(W9Fields),
-  )
-}
-
-pub type LpSignatoryFields {
-  LpSignatoryFields(
-    commitment_amount: String,
-    individual_name: String,
-    entity_name: String,
-  )
-}
-
-pub type W9Fields {
-  W9Fields(ssn: String, ein: String, line2: String)
-}
-
-/// Target table fields (mirrors TargetTableFieldsMap from proto)
-pub type TargetFields {
-  TargetFields(
-    commitment_amount: Float,
-    investor_name: String,
-    regulated_status: String,
-    intl_supplements: List(String),
-    signer_first_name: String,
-    signer_middle_name: String,
-    signer_last_name: String,
-    tin_type: String,
-  )
-}
-
-// --- Helpers ---
 
 pub fn split_name(fullname: String) -> NameParts {
   let trimmed = string.trim(fullname)
@@ -108,13 +80,46 @@ fn deduplicate(items: List(String)) -> List(String) {
   })
 }
 
+/// Helper to create a StringType with just a value (convenience for tests/construction).
+pub fn str(value: String) -> StringType {
+  StringType(type_id: "String", value: value, regex: "", format_patterns: [])
+}
+
+/// Helper to create a default NumberType.
+fn num(value: Float) -> NumberType {
+  NumberType(
+    type_id: "Number",
+    value: value,
+    decimal_places: 0,
+    min_value: 0.0,
+    max_value: 0.0,
+  )
+}
+
+/// Helper to create a default MultipleCheckboxType.
+fn checkbox(selected_keys: List(String)) -> MultipleCheckboxType {
+  MultipleCheckboxType(
+    type_id: "MultipleCheckbox",
+    selected_keys: selected_keys,
+    all_option_keys_in_order: [],
+    all_option_labels_in_order: [],
+  )
+}
+
+/// Helper to create a default RadioGroupType.
+fn radio(selected_key: String) -> RadioGroupType {
+  RadioGroupType(
+    type_id: "RadioGroup",
+    selected_key: selected_key,
+    all_option_keys_in_order: [],
+    all_option_labels_in_order: [],
+  )
+}
+
 // --- Mapping Functions ---
 
-fn map_commitment(src: SourceFields) -> Float {
-  let raw = case src.lp_signatory {
-    Some(lp) -> lp.commitment_amount
-    None -> ""
-  }
+fn map_commitment(src: SourceTableFieldsMap) -> Float {
+  let raw = src.lp_signatory.value_sub_fields.asa_commitment_amount.value
   let amount_str = string.replace(raw, ",", "")
   case float.parse(amount_str) {
     Ok(f) -> f
@@ -127,11 +132,14 @@ fn map_commitment(src: SourceFields) -> Float {
   }
 }
 
-fn map_investor_name(src: SourceFields) -> String {
-  first_non_empty([src.aml_name, src.general_name])
+fn map_investor_name(src: SourceTableFieldsMap) -> String {
+  first_non_empty([
+    src.asa_fullname_investorname_amlquestionnaire.value,
+    src.asa_fullname_investorname_generalinfo1.value,
+  ])
 }
 
-fn map_regulated_status(src: SourceFields) -> String {
+fn map_regulated_status(src: SourceTableFieldsMap) -> String {
   let option_map = [
     #(
       "yes_luxsentity_regulatedstatus_part2_duediligencequestionnaire",
@@ -143,19 +151,24 @@ fn map_regulated_status(src: SourceFields) -> String {
     ),
   ]
   let mapped =
-    list.filter_map(src.regulated_keys, fn(k) {
-      case lookup(k, option_map) {
-        Some(v) -> Ok(v)
-        None -> Error(Nil)
-      }
-    })
+    list.filter_map(
+      src
+        .luxsentity_regulatedstatus_part2_duediligencequestionnaire
+        .selected_keys,
+      fn(k) {
+        case lookup(k, option_map) {
+          Some(v) -> Ok(v)
+          None -> Error(Nil)
+        }
+      },
+    )
   case mapped {
     [first, ..] -> first
     [] -> ""
   }
 }
 
-fn map_international_supplements(src: SourceFields) -> List(String) {
+fn map_international_supplements(src: SourceTableFieldsMap) -> List(String) {
   let option_map = [
     #(
       "eea_indi_internationalsupplements_part1_duediligencequestionnaire",
@@ -206,7 +219,15 @@ fn map_international_supplements(src: SourceFields) -> List(String) {
       "No Supplement",
     ),
   ]
-  let all_keys = list.append(src.indi_intl_keys, src.entity_intl_keys)
+  let all_keys =
+    list.append(
+      src
+        .indi_internationalsupplements_part1_duediligencequestionnaire
+        .selected_keys,
+      src
+        .entity_internationalsupplements_part1_duediligencequestionnaire
+        .selected_keys,
+    )
   let mapped =
     list.filter_map(all_keys, fn(k) {
       case lookup(k, option_map) {
@@ -217,68 +238,95 @@ fn map_international_supplements(src: SourceFields) -> List(String) {
   deduplicate(mapped)
 }
 
-fn map_signer_name(src: SourceFields) -> NameParts {
-  let fullname = case src.lp_signatory {
-    Some(lp) -> first_non_empty([lp.individual_name, lp.entity_name])
-    None -> ""
-  }
+fn map_signer_name(src: SourceTableFieldsMap) -> NameParts {
+  let lp = src.lp_signatory.value_sub_fields
+  let fullname =
+    first_non_empty([
+      lp.individual_subscribername_signaturepage.value,
+      lp.entity_authorizedname_signaturepage.value,
+    ])
   split_name(fullname)
 }
 
-fn map_w9_tin_type(src: SourceFields) -> String {
-  case src.w9 {
-    Some(w9) ->
-      case w9.line2 != "" {
-        True -> ""
-        False ->
-          case w9.ssn != "" {
-            True -> "SSN"
-            False -> "EIN"
-          }
+fn map_w9_tin_type(src: SourceTableFieldsMap) -> String {
+  let w9 = src.w9.value_sub_fields
+  case w9.w9_line2.value != "" {
+    True -> ""
+    False ->
+      case w9.w9_parti_ssn1.value != "" {
+        True -> "SSN"
+        False -> "EIN"
       }
-    None -> "EIN"
   }
 }
 
 // --- Main Transform ---
 
 /// Apply all 6 mappings to source fields, producing target fields.
-pub fn transform(src: SourceFields) -> TargetFields {
+pub fn transform(src: SourceTableFieldsMap) -> TargetTableFieldsMap {
   let commitment = map_commitment(src)
   let investor_name = map_investor_name(src)
   let regulated_status = map_regulated_status(src)
   let intl_supplements = map_international_supplements(src)
   let signer = map_signer_name(src)
   let tin_type = map_w9_tin_type(src)
-  TargetFields(
-    commitment_amount: commitment,
-    investor_name: investor_name,
-    regulated_status: regulated_status,
-    intl_supplements: intl_supplements,
-    signer_first_name: signer.first_name,
-    signer_middle_name: signer.middle_name,
-    signer_last_name: signer.last_name,
-    tin_type: tin_type,
+  TargetTableFieldsMap(
+    sf_agreement_null_commitment_c: MoneyType(
+      type_id: "Money",
+      value_sub_fields: MoneySubFields(
+        amount: num(commitment),
+        iso_currency_code: str(""),
+      ),
+      sub_field_keys_in_order: ["amount"],
+      label: "",
+    ),
+    sf_account_subscription_investor_name: str(investor_name),
+    sf_account_subscription_investor_wlc_publicly_listed_on_a_stock_exchange_c: radio(
+      regulated_status,
+    ),
+    sf_agreement_null_wlc_international_supplements_c: checkbox(
+      intl_supplements,
+    ),
+    sf_agreement_null_signer_first_name: str(signer.first_name),
+    sf_agreement_null_signer_middle_name: str(signer.middle_name),
+    sf_agreement_null_signer_last_name: str(signer.last_name),
+    sf_tax_form_w9_us_tin_type_c: radio(tin_type),
   )
 }
 
 // --- Test Helper ---
 
 /// Default source for testing.
-pub fn default_source() -> SourceFields {
-  SourceFields(
-    lp_signatory: Some(LpSignatoryFields(
-      commitment_amount: "5000000",
-      individual_name: "",
-      entity_name: "John Doe",
-    )),
-    aml_name: "",
-    general_name: "ACME Corp",
-    regulated_keys: [
+pub fn default_source() -> SourceTableFieldsMap {
+  SourceTableFieldsMap(
+    lp_signatory: LpSignatoryType(
+      type_id: "CustomCompound",
+      value_sub_fields: LpSignatoryFields(
+        asa_commitment_amount: str("5000000"),
+        individual_subscribername_signaturepage: str(""),
+        entity_authorizedname_signaturepage: str("John Doe"),
+      ),
+      sub_field_keys_in_order: [],
+      label: "",
+    ),
+    asa_fullname_investorname_amlquestionnaire: str(""),
+    asa_fullname_investorname_generalinfo1: str("ACME Corp"),
+    luxsentity_regulatedstatus_part2_duediligencequestionnaire: checkbox([
       "yes_luxsentity_regulatedstatus_part2_duediligencequestionnaire",
-    ],
-    indi_intl_keys: [],
-    entity_intl_keys: [],
-    w9: Some(W9Fields(ssn: "", ein: "", line2: "")),
+    ]),
+    indi_internationalsupplements_part1_duediligencequestionnaire: checkbox([]),
+    entity_internationalsupplements_part1_duediligencequestionnaire: checkbox(
+      [],
+    ),
+    w9: W9Type(
+      type_id: "CustomCompound",
+      value_sub_fields: W9Fields(
+        w9_parti_ssn1: str(""),
+        w9_parti_ein1: str(""),
+        w9_line2: str(""),
+      ),
+      sub_field_keys_in_order: [],
+      label: "",
+    ),
   )
 }

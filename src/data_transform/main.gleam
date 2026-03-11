@@ -1,14 +1,17 @@
 //// CLI entry point for data transformation.
 //// Port of OCaml bin/main.ml.
 
-import data_transform/example_mappings.{
-  type TargetFields, LpSignatoryFields, SourceFields, W9Fields,
-}
+import data_transform/example_mappings.{str}
 import data_transform/json_value.{type JsonValue, JsonFloat, JsonObject, JsonString}
+import data_transform/proto/data_types.{MultipleCheckboxType}
+import data_transform/proto/source_table.{
+  type SourceTableFieldsMap, LpSignatoryFields, LpSignatoryType,
+  SourceTableFieldsMap, W9Fields, W9Type,
+}
+import data_transform/proto/target_table.{type TargetTableFieldsMap}
 import gleam/dict
 import gleam/io
 import gleam/list
-import gleam/option.{None, Some}
 
 @external(javascript, "./main_ffi.mjs", "read_file")
 fn read_file(path: String) -> Result(String, String)
@@ -42,71 +45,92 @@ pub fn main() {
   }
 }
 
-/// Convert JSON input to SourceFields.
-pub fn json_to_source(json: JsonValue) -> example_mappings.SourceFields {
+/// Convert JSON input to SourceTableFieldsMap.
+pub fn json_to_source(json: JsonValue) -> SourceTableFieldsMap {
   let fields = json_value.as_object(json)
 
-  let lp_signatory = case dict.get(fields, "lpSignatory") {
+  let lp_sub = case dict.get(fields, "lpSignatory") {
     Ok(lp_json) -> {
       let lp_fields = json_value.as_object(lp_json)
-      let sub_fields = case dict.get(lp_fields, "valueSubFields") {
+      case dict.get(lp_fields, "valueSubFields") {
         Ok(sf) -> json_value.as_object(sf)
         Error(_) -> dict.new()
       }
-      Some(LpSignatoryFields(
-        commitment_amount: get_sub_value(sub_fields, "asaCommitmentAmount"),
-        individual_name: get_sub_value(
-          sub_fields,
-          "individualSubscribernameSignaturepage",
-        ),
-        entity_name: get_sub_value(
-          sub_fields,
-          "entityAuthorizednameSignaturepage",
-        ),
-      ))
     }
-    Error(_) -> None
+    Error(_) -> dict.new()
   }
 
-  let w9 = case dict.get(fields, "w9") {
+  let w9_sub = case dict.get(fields, "w9") {
     Ok(w9_json) -> {
       let w9_fields = json_value.as_object(w9_json)
-      let sub_fields = case dict.get(w9_fields, "valueSubFields") {
+      case dict.get(w9_fields, "valueSubFields") {
         Ok(sf) -> json_value.as_object(sf)
         Error(_) -> dict.new()
       }
-      Some(W9Fields(
-        ssn: get_sub_value(sub_fields, "w9PartiSsn1"),
-        ein: get_sub_value(sub_fields, "w9PartiEin1"),
-        line2: get_sub_value(sub_fields, "w9Line2"),
-      ))
     }
-    Error(_) -> None
+    Error(_) -> dict.new()
   }
 
-  SourceFields(
-    lp_signatory: lp_signatory,
-    aml_name: get_field_value(
-      fields,
-      "asaFullnameInvestornameAmlquestionnaire",
+  SourceTableFieldsMap(
+    lp_signatory: LpSignatoryType(
+      type_id: "CustomCompound",
+      value_sub_fields: LpSignatoryFields(
+        asa_commitment_amount: str(
+          get_sub_value(lp_sub, "asaCommitmentAmount"),
+        ),
+        individual_subscribername_signaturepage: str(
+          get_sub_value(lp_sub, "individualSubscribernameSignaturepage"),
+        ),
+        entity_authorizedname_signaturepage: str(
+          get_sub_value(lp_sub, "entityAuthorizednameSignaturepage"),
+        ),
+      ),
+      sub_field_keys_in_order: [],
+      label: "",
     ),
-    general_name: get_field_value(
-      fields,
-      "asaFullnameInvestornameGeneralinfo1",
+    asa_fullname_investorname_amlquestionnaire: str(
+      get_field_value(fields, "asaFullnameInvestornameAmlquestionnaire"),
     ),
-    regulated_keys: get_field_selected_keys(
-      fields,
-      "luxsentityRegulatedstatusPart2Duediligencequestionnaire",
+    asa_fullname_investorname_generalinfo1: str(
+      get_field_value(fields, "asaFullnameInvestornameGeneralinfo1"),
     ),
-    indi_intl_keys: get_field_selected_keys(
-      fields,
-      "indiInternationalsupplementsPart1Duediligencequestionnaire",
+    luxsentity_regulatedstatus_part2_duediligencequestionnaire: MultipleCheckboxType(
+      type_id: "MultipleCheckbox",
+      selected_keys: get_field_selected_keys(
+        fields,
+        "luxsentityRegulatedstatusPart2Duediligencequestionnaire",
+      ),
+      all_option_keys_in_order: [],
+      all_option_labels_in_order: [],
     ),
-    entity_intl_keys: get_field_selected_keys(
-      fields,
-      "entityInternationalsupplementsPart1Duediligencequestionnaire",
+    indi_internationalsupplements_part1_duediligencequestionnaire: MultipleCheckboxType(
+      type_id: "MultipleCheckbox",
+      selected_keys: get_field_selected_keys(
+        fields,
+        "indiInternationalsupplementsPart1Duediligencequestionnaire",
+      ),
+      all_option_keys_in_order: [],
+      all_option_labels_in_order: [],
     ),
-    w9: w9,
+    entity_internationalsupplements_part1_duediligencequestionnaire: MultipleCheckboxType(
+      type_id: "MultipleCheckbox",
+      selected_keys: get_field_selected_keys(
+        fields,
+        "entityInternationalsupplementsPart1Duediligencequestionnaire",
+      ),
+      all_option_keys_in_order: [],
+      all_option_labels_in_order: [],
+    ),
+    w9: W9Type(
+      type_id: "CustomCompound",
+      value_sub_fields: W9Fields(
+        w9_parti_ssn1: str(get_sub_value(w9_sub, "w9PartiSsn1")),
+        w9_parti_ein1: str(get_sub_value(w9_sub, "w9PartiEin1")),
+        w9_line2: str(get_sub_value(w9_sub, "w9Line2")),
+      ),
+      sub_field_keys_in_order: [],
+      label: "",
+    ),
   )
 }
 
@@ -164,8 +188,8 @@ fn get_field_selected_keys(
   }
 }
 
-/// Convert TargetFields to JSON output format (matching OCaml's output).
-pub fn target_to_json(target: TargetFields) -> JsonValue {
+/// Convert TargetTableFieldsMap to JSON output format (matching OCaml's output).
+pub fn target_to_json(target: TargetTableFieldsMap) -> JsonValue {
   JsonObject(
     dict.from_list([
       #(
@@ -182,7 +206,12 @@ pub fn target_to_json(target: TargetFields) -> JsonValue {
                     JsonObject(
                       dict.from_list([
                         #("typeId", JsonString("Number")),
-                        #("value", JsonFloat(target.commitment_amount)),
+                        #(
+                          "value",
+                          JsonFloat(
+                            target.sf_agreement_null_commitment_c.value_sub_fields.amount.value,
+                          ),
+                        ),
                       ]),
                     ),
                   ),
@@ -197,7 +226,10 @@ pub fn target_to_json(target: TargetFields) -> JsonValue {
         JsonObject(
           dict.from_list([
             #("typeId", JsonString("String")),
-            #("value", JsonString(target.investor_name)),
+            #(
+              "value",
+              JsonString(target.sf_account_subscription_investor_name.value),
+            ),
           ]),
         ),
       ),
@@ -206,7 +238,14 @@ pub fn target_to_json(target: TargetFields) -> JsonValue {
         JsonObject(
           dict.from_list([
             #("typeId", JsonString("RadioGroup")),
-            #("selectedKey", JsonString(target.regulated_status)),
+            #(
+              "selectedKey",
+              JsonString(
+                target
+                  .sf_account_subscription_investor_wlc_publicly_listed_on_a_stock_exchange_c
+                  .selected_key,
+              ),
+            ),
           ]),
         ),
       ),
@@ -218,7 +257,12 @@ pub fn target_to_json(target: TargetFields) -> JsonValue {
             #(
               "selectedKeys",
               json_value.JsonArray(
-                list.map(target.intl_supplements, JsonString),
+                list.map(
+                  target
+                    .sf_agreement_null_wlc_international_supplements_c
+                    .selected_keys,
+                  JsonString,
+                ),
               ),
             ),
           ]),
@@ -229,7 +273,10 @@ pub fn target_to_json(target: TargetFields) -> JsonValue {
         JsonObject(
           dict.from_list([
             #("typeId", JsonString("String")),
-            #("value", JsonString(target.signer_first_name)),
+            #(
+              "value",
+              JsonString(target.sf_agreement_null_signer_first_name.value),
+            ),
           ]),
         ),
       ),
@@ -238,7 +285,10 @@ pub fn target_to_json(target: TargetFields) -> JsonValue {
         JsonObject(
           dict.from_list([
             #("typeId", JsonString("String")),
-            #("value", JsonString(target.signer_middle_name)),
+            #(
+              "value",
+              JsonString(target.sf_agreement_null_signer_middle_name.value),
+            ),
           ]),
         ),
       ),
@@ -247,7 +297,10 @@ pub fn target_to_json(target: TargetFields) -> JsonValue {
         JsonObject(
           dict.from_list([
             #("typeId", JsonString("String")),
-            #("value", JsonString(target.signer_last_name)),
+            #(
+              "value",
+              JsonString(target.sf_agreement_null_signer_last_name.value),
+            ),
           ]),
         ),
       ),
@@ -256,7 +309,10 @@ pub fn target_to_json(target: TargetFields) -> JsonValue {
         JsonObject(
           dict.from_list([
             #("typeId", JsonString("RadioGroup")),
-            #("selectedKey", JsonString(target.tin_type)),
+            #(
+              "selectedKey",
+              JsonString(target.sf_tax_form_w9_us_tin_type_c.selected_key),
+            ),
           ]),
         ),
       ),
